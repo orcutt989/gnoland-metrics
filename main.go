@@ -1,110 +1,74 @@
 package main
 
 import (
-	"encoding/json"
+	"bytes"
+	"context"
 	"flag"
-	"fmt"
+	"html/template"
 	"log"
-	"net/url"
+	"net/http"
 
-	"github.com/gorilla/websocket"
+	"github.com/gin-gonic/gin"
+	"github.com/shurcooL/graphql"
 )
 
-type GraphQLRequest struct {
-	Query string `json:"query"`
-}
+var (
+	jsonrpcURL = flag.String("jsonrpc-url", "", "URL of the JSON RPC API")
+)
 
-type GraphQLResponse struct {
-	Data   interface{} `json:"data,omitempty"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors,omitempty"`
-}
-
-func executeGraphQLQuery(wsURL, query string) (*GraphQLResponse, error) {
-	u := url.URL{Scheme: "ws", Host: wsURL, Path: "/ws"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	defer c.Close()
-
-	requestBody, err := json.Marshal(GraphQLRequest{Query: query})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := c.WriteMessage(websocket.TextMessage, requestBody); err != nil {
-		return nil, err
-	}
-
-	var response GraphQLResponse
-	_, message, err := c.ReadMessage()
-	if err != nil {
-		return nil, err
-	}
-
-	if err := json.Unmarshal(message, &response); err != nil {
-		return nil, err
-	}
-
-	if len(response.Errors) > 0 {
-		return nil, fmt.Errorf("GraphQL error: %s", response.Errors[0].Message)
-	}
-
-	return &response, nil
+type BlockHeightResponse struct {
+	LatestBlockHeight int `json:"latestBlockHeight"`
 }
 
 func main() {
-	var listenAddress string
-	flag.StringVar(&listenAddress, "listen-address", "localhost:8545", "WebSocket endpoint address")
 	flag.Parse()
 
-	wsURL := listenAddress
-
-	// GraphQL queries
-	queries := map[string]string{
-		"transactionsCount": `
-			query {
-				blocks(filter: { from_height: 1, to_height: 999999 }) {
-					height
-					transactions {
-						index
-					}
-				}
-			}
-		`,
-		"distinctMessageTypesCount": `
-			query {
-				transactions(filter: { from_block_height: 1 }) {
-					hash
-				}
-			}
-		`,
-		"mostActiveTransactionSenders": `
-			query {
-				transactions(filter: { from_block_height: 1 }) {
-					index
-					gas_wanted
-				}
-			}
-		`,
+	if *jsonrpcURL == "" {
+		log.Fatal("Error: jsonrpc-url flag is required")
 	}
 
-	for metricName, query := range queries {
-		response, err := executeGraphQLQuery(wsURL, query)
-		if err != nil {
-			log.Fatalf("Error executing GraphQL query for %s: %v", metricName, err)
+	router := gin.Default()
+
+	router.GET("/dashboard", func(c *gin.Context) {
+		client := graphql.NewClient(*jsonrpcURL, nil)
+
+		var query struct {
+			LatestBlockHeight int `graphql:"latestBlockHeight"`
 		}
 
-		if len(response.Errors) > 0 {
-			for _, e := range response.Errors {
-				log.Printf("Error for %s: %s", metricName, e.Message)
-			}
-		} else {
-			fmt.Printf("Metric: %s\n", metricName)
-			fmt.Printf("Response: %+v\n", response.Data)
-			fmt.Println("----------------------------------------")
+		if err := client.Query(context.Background(), &query, nil); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch block height"})
+			return
 		}
+
+		tmpl, err := template.New("dashboard").Parse(`
+			<!DOCTYPE html>
+			<html>
+			<head>
+				<title>Dashboard</title>
+			</head>
+			<body>
+				<h1>Dashboard</h1>
+				<p>Current Block Height: {{ .LatestBlockHeight }}</p>
+			</body>
+			</html>
+		`)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse template"})
+			return
+		}
+
+		var tplBuffer bytes.Buffer
+		data := gin.H{"LatestBlockHeight": query.LatestBlockHeight}
+		if err := tmpl.Execute(&tplBuffer, data); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute template"})
+			return
+		}
+
+		c.Data(http.StatusOK, "text/html; charset=utf-8", tplBuffer.Bytes())
+	})
+
+	if err := router.Run(":8080"); err != nil {
+		log.Fatal("Error starting server:", err)
 	}
 }
