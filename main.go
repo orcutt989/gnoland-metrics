@@ -118,18 +118,44 @@ func main() {
 		totalTransactions := len(totalTransactionsQuery.Data.Transactions)
 
 		tmpl, err := template.New("dashboard").Parse(`
-			<!DOCTYPE html>
-			<html>
-			<head>
-				<title>Dashboard</title>
-			</head>
-			<body>
-				<h1>Dashboard</h1>
-				<p>Current Block Height: {{ .LatestBlockHeight }}</p>
-				<p>Total Transactions Since Block 1: {{ .TotalTransactionsSinceBlock1 }}</p>
-			</body>
-			</html>
-		`)
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Dashboard</title>
+      <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    </head>
+    <body>
+      <h1>Dashboard</h1>
+      <p>Current Block Height: {{ .LatestBlockHeight }}</p>
+      <p>Total Transactions Since Block 1: {{ .TotalTransactionsSinceBlock1 }}</p>
+      <canvas id="transactionsChart" width="800" height="400"></canvas>
+      <script>
+        var ctx = document.getElementById('transactionsChart').getContext('2d');
+        var myChart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: ['6 hours ago', '5 hours ago', '4 hours ago', '3 hours ago', '2 hours ago', '1 hour ago', 'Now'],
+            datasets: [{
+              label: 'Transactions per Hour',
+              data: [0, 0, 0, 0, 0, 0, {{ .TotalTransactionsSinceBlock1 }}],
+              backgroundColor: 'rgba(54, 162, 235, 0.5)',
+              borderColor: 'rgba(54, 162, 235, 1)',
+              borderWidth: 1
+            }]
+          },
+          options: {
+            scales: {
+              y: {
+                beginAtZero: true
+              }
+            }
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `)
+
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse template"})
 			return
