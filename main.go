@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -58,11 +57,77 @@ func main() {
 			return
 		}
 
+		// Convert block height to string for GraphQL query
+		fromBlockHeight := 1
+		toBlockHeight := blockHeightQuery.LatestBlockHeight
+
+		// Create the variables map
+		variables := map[string]interface{}{
+			"fromBlockHeight": fromBlockHeight,
+			"toBlockHeight":   toBlockHeight,
+		}
+
+		// Create the GraphQL query
+		query := `
+			query TotalTransactions($fromBlockHeight: Int, $toBlockHeight: Int) {
+				transactions(filter: { from_block_height: $fromBlockHeight, to_block_height: $toBlockHeight }) {
+					index
+					hash
+					block_height
+					gas_wanted
+					gas_used
+					content_raw
+				}
+			}
+		`
+
+		// Create the request body
+		requestBody := map[string]interface{}{
+			"query":     query,
+			"variables": variables,
+		}
+
+		// Convert the request body to JSON
+		requestBodyJSON, err := json.Marshal(requestBody)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create JSON request"})
+			return
+		}
+
+		// Create and send the HTTP request
+		req, err := http.NewRequest("POST", *jsonrpcURL, bytes.NewBuffer(requestBodyJSON))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create HTTP request"})
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		// Send the HTTP request
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send HTTP request"})
+			return
+		}
+		defer resp.Body.Close()
+
+		// Decode the response
+		var totalTransactionsQuery struct {
+			Data struct {
+				Transactions []Transaction `json:"transactions"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&totalTransactionsQuery); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to decode JSON response"})
+			return
+		}
+
+		totalTransactions := len(totalTransactionsQuery.Data.Transactions)
+
 		// Get the time 6 hours ago
 		sixHoursAgo := time.Now().Add(-6 * time.Hour)
 
 		// Create the variables map for fetching blocks
-		variables := map[string]interface{}{
+		variablesBlocks := map[string]interface{}{
 			"fromTime": sixHoursAgo.Format(time.RFC3339),
 			"toTime":   time.Now().Format(time.RFC3339),
 		}
@@ -80,7 +145,7 @@ func main() {
 		// Create the request body for fetching blocks
 		blockRequestBody := map[string]interface{}{
 			"query":     blockQuery,
-			"variables": variables,
+			"variables": variablesBlocks,
 		}
 
 		// Convert the block request body to JSON
@@ -126,8 +191,9 @@ func main() {
 
 		// Prepare data for HTML template
 		data := gin.H{
-			"TransactionsPerHour": transactionsPerHour,
-			"LatestBlockHeight":   blockHeightQuery.LatestBlockHeight,
+			"TransactionsPerHour":          transactionsPerHour,
+			"LatestBlockHeight":            blockHeightQuery.LatestBlockHeight,
+			"TotalTransactionsSinceBlock1": totalTransactions,
 		}
 
 		tmpl, err := template.New("dashboard").Parse(`
@@ -139,6 +205,8 @@ func main() {
     </head>
     <body>
         <h1>Dashboard</h1>
+        <p>Current Block Height: {{ .LatestBlockHeight }}</p>
+        <p>Total Transactions Since Block 1: {{ .TotalTransactionsSinceBlock1 }}</p>
         <canvas id="transactionsChart" width="800" height="400"></canvas>
         <script>
             var ctx = document.getElementById('transactionsChart').getContext('2d');
@@ -164,7 +232,6 @@ func main() {
                 }
             });
         </script>
-        <p>Current Block Height: {{ .LatestBlockHeight }}</p>
     </body>
     </html>
     
@@ -174,13 +241,6 @@ func main() {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse template"})
 			return
 		}
-
-		// Debugging: Print the template and data
-		fmt.Println("HTML Template:")
-		fmt.Println(tmpl)
-
-		fmt.Println("Data:")
-		fmt.Println(data)
 
 		var tplBuffer bytes.Buffer
 		if err := tmpl.Execute(&tplBuffer, data); err != nil {
