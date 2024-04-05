@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"html/template"
 	"log"
@@ -18,10 +19,12 @@ var (
 	jsonrpcURL = flag.String("jsonrpc-url", "", "URL of the JSON RPC API")
 )
 
+// BlockHeightResponse represents the response containing the latest block height.
 type BlockHeightResponse struct {
 	LatestBlockHeight int `json:"latestBlockHeight"`
 }
 
+// Transaction represents a blockchain transaction.
 type Transaction struct {
 	Index       int    `json:"index"`
 	Hash        string `json:"hash"`
@@ -31,6 +34,7 @@ type Transaction struct {
 	ContentRaw  string `json:"content_raw"`
 }
 
+// Block represents a block in the blockchain.
 type Block struct {
 	Height int       `json:"height"`
 	Time   time.Time `json:"time"`
@@ -45,6 +49,7 @@ func main() {
 
 	router := gin.Default()
 
+	// Handle GET request for /dashboard endpoint
 	router.GET("/dashboard", func(c *gin.Context) {
 		client := graphql.NewClient(*jsonrpcURL, nil)
 
@@ -61,13 +66,13 @@ func main() {
 		fromBlockHeight := 1
 		toBlockHeight := blockHeightQuery.LatestBlockHeight
 
-		// Create the variables map
+		// Create the variables map for GraphQL query
 		variables := map[string]interface{}{
 			"fromBlockHeight": fromBlockHeight,
 			"toBlockHeight":   toBlockHeight,
 		}
 
-		// Create the GraphQL query
+		// Create the GraphQL query for fetching transactions
 		query := `
 			query TotalTransactions($fromBlockHeight: Int, $toBlockHeight: Int) {
 				transactions(filter: { from_block_height: $fromBlockHeight, to_block_height: $toBlockHeight }) {
@@ -81,36 +86,15 @@ func main() {
 			}
 		`
 
-		// Create the request body
-		requestBody := map[string]interface{}{
-			"query":     query,
-			"variables": variables,
-		}
-
-		// Convert the request body to JSON
-		requestBodyJSON, err := json.Marshal(requestBody)
+		// Execute the GraphQL query to fetch transactions
+		resp, err := executeGraphQLQuery(client, variables, query)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create JSON request"})
-			return
-		}
-
-		// Create and send the HTTP request
-		req, err := http.NewRequest("POST", *jsonrpcURL, bytes.NewBuffer(requestBodyJSON))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create HTTP request"})
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-
-		// Send the HTTP request
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send HTTP request"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch transactions"})
 			return
 		}
 		defer resp.Body.Close()
 
-		// Decode the response
+		// Decode the response to get total transactions
 		var totalTransactionsQuery struct {
 			Data struct {
 				Transactions []Transaction `json:"transactions"`
@@ -126,7 +110,7 @@ func main() {
 		// Get the time 6 hours ago
 		sixHoursAgo := time.Now().Add(-6 * time.Hour)
 
-		// Create the variables map for fetching blocks
+		// Create the variables map for GraphQL query to fetch blocks
 		variablesBlocks := map[string]interface{}{
 			"fromTime": sixHoursAgo.Format(time.RFC3339),
 			"toTime":   time.Now().Format(time.RFC3339),
@@ -142,31 +126,10 @@ func main() {
 			}
 		`
 
-		// Create the request body for fetching blocks
-		blockRequestBody := map[string]interface{}{
-			"query":     blockQuery,
-			"variables": variablesBlocks,
-		}
-
-		// Convert the block request body to JSON
-		blockRequestBodyJSON, err := json.Marshal(blockRequestBody)
+		// Execute the GraphQL query to fetch blocks
+		blockResp, err := executeGraphQLQuery(client, variablesBlocks, blockQuery)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create JSON request for blocks"})
-			return
-		}
-
-		// Create and send the HTTP request to fetch blocks
-		blockReq, err := http.NewRequest("POST", *jsonrpcURL, bytes.NewBuffer(blockRequestBodyJSON))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create HTTP request for blocks"})
-			return
-		}
-		blockReq.Header.Set("Content-Type", "application/json")
-
-		// Send the HTTP request to fetch blocks
-		blockResp, err := http.DefaultClient.Do(blockReq)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send HTTP request for blocks"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch blocks"})
 			return
 		}
 		defer blockResp.Body.Close()
@@ -196,7 +159,54 @@ func main() {
 			"TotalTransactionsSinceBlock1": totalTransactions,
 		}
 
-		tmpl, err := template.New("dashboard").Parse(`
+		// Render HTML template and send response
+		renderHTMLTemplate(c, data)
+	})
+
+	// Start the HTTP server
+	if err := router.Run(":8080"); err != nil {
+		log.Fatal("Error starting server:", err)
+	}
+}
+
+// executeGraphQLQuery executes a GraphQL query using the provided client, variables, and query string.
+func executeGraphQLQuery(client *graphql.Client, variables map[string]interface{}, query string) (*http.Response, error) {
+	// Create the request body
+	requestBody := map[string]interface{}{
+		"query":     query,
+		"variables": variables,
+	}
+
+	// Convert the request body to JSON
+	requestBodyJSON, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create and send the HTTP request
+	req, err := http.NewRequest("POST", *jsonrpcURL, bytes.NewBuffer(requestBodyJSON))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send the HTTP request
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check the HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("non-200 OK status code: " + resp.Status)
+	}
+
+	return resp, nil
+}
+
+// renderHTMLTemplate renders the HTML template with the provided data and sends the response.
+func renderHTMLTemplate(c *gin.Context, data gin.H) {
+	tmpl, err := template.New("dashboard").Parse(`
     <!DOCTYPE html>
     <html>
     <head>
@@ -235,24 +245,19 @@ func main() {
     </body>
     </html>
     
-		`)
-		if err != nil {
-			log.Printf("Failed to parse template: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse template"})
-			return
-		}
-
-		var tplBuffer bytes.Buffer
-		if err := tmpl.Execute(&tplBuffer, data); err != nil {
-			log.Printf("Failed to execute template: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute template"})
-			return
-		}
-
-		c.Data(http.StatusOK, "text/html; charset=utf-8", tplBuffer.Bytes())
-	})
-
-	if err := router.Run(":8080"); err != nil {
-		log.Fatal("Error starting server:", err)
+	`)
+	if err != nil {
+		log.Printf("Failed to parse template: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse template"})
+		return
 	}
+
+	var tplBuffer bytes.Buffer
+	if err := tmpl.Execute(&tplBuffer, data); err != nil {
+		log.Printf("Failed to execute template: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to execute template"})
+		return
+	}
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", tplBuffer.Bytes())
 }
