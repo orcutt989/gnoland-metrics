@@ -77,21 +77,6 @@ jobs:
         with:
           go-version: '1.x'  # Use the latest Go version
 
-      - name: Build Binary
-        run: |
-          go build
-          readlink -f gnoland-metrics
-
-      - name: Upload Binary to Release
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ github.event.repository.releases_url }}
-          asset_path: /home/runner/work/gnoland-metrics/gnoland-metrics/gnoland-metrics
-          asset_name: gnoland-metrics
-          asset_content_type: application/octet-stream
-
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -103,6 +88,20 @@ jobs:
           body: Automated release from CI/CD.
           draft: false
           prerelease: false
+
+      - name: Build Binary
+        run: |
+          go build
+
+      - name: Upload Binary to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.repository.releases_url }}
+          asset_path: ./gnoland-metrics
+          asset_name: gnoland-metrics
+          asset_content_type: application/octet-stream
 
   build-docker:
     name: Build Docker Container
