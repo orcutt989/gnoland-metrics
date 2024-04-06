@@ -78,6 +78,16 @@ jobs:
       - name: Build Binary
         run: go build
 
+      - name: Upload Binary to Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.repository.releases_url }}
+          asset_path: ./binary-file-name  # Update with the path to your binary file
+          asset_name: binary-file-name  # Update with the name of your binary file
+          asset_content_type: application/octet-stream
+
       - name: Get latest release tag
         id: get_latest_tag
         run: |
@@ -118,13 +128,10 @@ jobs:
         with:
           go-version: '1.x'  # Use the latest Go version
 
-      - name: Build Binary
-        run: go build
-
       - name: Build Docker image
         run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }} .
-          docker tag ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }} ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
+          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.get_latest_tag.outputs.release_tag }} .
+          docker tag ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.get_latest_tag.outputs.release_tag }} ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
@@ -135,23 +142,47 @@ jobs:
 
       - name: Push Docker image to GHCR
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }}
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.get_latest_tag.outputs.release_tag }}
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
 
-      - name: Handle Docker Build Failure
-        if: ${{ failure() }}
+  handle-docker-build-failure:
+    name: Handle Docker Build Failure
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+
+    steps:
+      - name: Check Docker build status
+        id: docker_build
+        run: exit ${{ job.status }}
+
+      - name: Run cleanup
+        if: steps.docker_build.outcome == 'failure'
         run: |
           echo "Docker build failed, deleting release and tag..."
+
           TAG_NAME="${{ steps.get_latest_tag.outputs.release_tag }}"
           GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}"
           REPO_NAME="${{ github.event.repository.name }}"
           OWNER="${{ github.repository_owner }}"
 
-          # Delete the tag
-          curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$OWNER/$REPO_NAME/git/refs/tags/$TAG_NAME"
+          # Check if the tag exists before attempting to delete it
+          if [[ -n "$TAG_NAME" ]]; then
+            curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$OWNER/$REPO_NAME/git/refs/tags/$TAG_NAME"
+            echo "Tag deleted successfully: $TAG_NAME"
+          else
+            echo "Tag does not exist."
+          fi
 
           # Get the release ID
           RELEASE_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$OWNER/$REPO_NAME/releases/tags/$TAG_NAME" | jq -r '.id')
 
-          # Delete the release
-          curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$OWNER/$REPO_NAME/releases/$RELEASE_ID"
+          # Check if the release ID is valid before attempting to delete the release
+          if [[ -n "$RELEASE_ID" && "$RELEASE_ID" != "null" ]]; then
+            curl -X DELETE -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/$OWNER/$REPO_NAME/releases/$RELEASE_ID"
+            echo "Release deleted successfully: $RELEASE_ID"
+          else
+            echo "Release does not exist or could not be deleted."
+          fi
+
+      - name: Fail the workflow
+        run: exit 1
