@@ -1,4 +1,3 @@
-
 name: Go CI/CD
 
 on:
@@ -38,10 +37,37 @@ jobs:
           if [ -z "$latest_tag" ]; then
             echo "No existing tags found."
             echo "::set-output name=existing_release::false"
+            echo "::set-output name=release_tag::1.0.0"
           else
             echo "Existing release found: $latest_tag"
             echo "::set-output name=existing_release::true"
+            echo "::set-output name=release_tag::$latest_tag"
           fi
+
+      - name: Check Docker build status
+        id: check_docker_build
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest .
+        env:
+          DOCKER_BUILDKIT: 1
+          DOCKER_CLI_EXPERIMENTAL: enabled
+
+      - name: Handle Docker build failure
+        if: ${{ failure() }}
+        run: |
+          echo "Docker build failed, deleting release and tag..."
+
+          # Get the latest release ID
+          release_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/latest | jq -r '.id')
+
+          # Delete the release
+          curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/$release_id
+
+          # Delete the tag
+          git push --delete origin latest
+
+          # Exit with a failure status
+          exit 1
 
   test:
     name: Run Tests
@@ -119,8 +145,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }} .
-          docker tag ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }} ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
+          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.get_latest_tag.outputs.release_tag }} .
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
@@ -131,6 +156,5 @@ jobs:
 
       - name: Push Docker image to GHCR
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }}
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
-        
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.get_latest_tag.outputs.release_tag }}
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
