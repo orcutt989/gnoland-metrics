@@ -100,13 +100,14 @@ jobs:
         uses: actions/upload-release-asset@v1
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./goland-metrics  # Path to your binary
-          asset_name: goland-metrics    # Name of the asset in the release
+          asset_path: ./gnoland-metrics  # Path to your binary
+          asset_name: gnoland-metrics    # Name of the asset in the release
           asset_content_type: application/octet-stream
 
   build-docker:
     name: Build Docker Container
     runs-on: ubuntu-latest
+    needs: [build-binary, create_release]
 
     steps:
       - name: Checkout code
