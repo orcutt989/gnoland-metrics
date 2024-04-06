@@ -84,8 +84,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.repository.releases_url }}
-          asset_path: ./binary-file-name  # Update with the path to your binary file
-          asset_name: binary-file-name  # Update with the name of your binary file
+          asset_path: ./gnoland-metrics
+          asset_name: gnoland-metrics
           asset_content_type: application/octet-stream
 
       - name: Get latest release tag
