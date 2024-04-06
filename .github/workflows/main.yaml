@@ -25,10 +25,27 @@ jobs:
             echo "::set-output name=go_changed::false"
           fi
 
+  check-existing-release:
+    name: Check Existing Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get latest release tag
+        id: get_latest_tag
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null) || true
+          if [ -z "$latest_tag" ]; then
+            echo "No existing tags found."
+            echo "::set-output name=existing_release::false"
+          else
+            echo "Existing release found: $latest_tag"
+            echo "::set-output name=existing_release::true"
+          fi
+
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    needs: check-go-changes
+    needs: [check-go-changes, check-existing-release]
     if: ${{ needs.check-go-changes.outputs.go_changed == 'true' }}
 
     steps:
@@ -46,7 +63,8 @@ jobs:
   build-binary:
     name: Build Binary and Release
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, check-existing-release]
+    if: ${{ needs.check-existing-release.outputs.existing_release == 'true' }}
 
     steps:
       - name: Checkout code
@@ -59,17 +77,6 @@ jobs:
 
       - name: Build Binary
         run: go build
-
-      - name: Get latest release tag
-        id: get_latest_tag
-        run: |
-          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null) || true
-          if [ -z "$latest_tag" ]; then
-            echo "No existing tags, setting initial version"
-            echo "::set-output name=release_tag::1.0.0"
-          else
-            echo "::set-output name=release_tag::$latest_tag"
-          fi
 
       - name: Create Release
         id: create_release
@@ -86,7 +93,8 @@ jobs:
   build-docker:
     name: Build Docker Container
     runs-on: ubuntu-latest
-    needs: build-binary
+    needs: [build-binary, check-existing-release]
+    if: ${{ needs.check-existing-release.outputs.existing_release == 'true' }}
 
     steps:
       - name: Checkout code
