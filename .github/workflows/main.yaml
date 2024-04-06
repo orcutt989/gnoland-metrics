@@ -1,0 +1,100 @@
+name: Go CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.x'  # Use the latest Go version
+
+      - name: Run tests
+        run: go test -v ./...
+
+  build-binary:
+    name: Build Binary and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.x'  # Use the latest Go version
+
+      - name: Build Binary
+        run: go build
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          release_name: Release v1.0.${{ github.run_number }}
+          body: |
+            Automated release from CI/CD.
+            
+            Commit messages since last release:
+            ${{ steps.get_commit_messages.outputs.commit_messages }}
+          draft: false
+          prerelease: false
+
+  get-commit-messages:
+    name: Get Commit Messages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Get commit messages
+        id: get_commit_messages
+        run: echo "::set-output name=commit_messages::$(git log --pretty=format:'%s' ${{ github.event.before }}..${{ github.sha }})"
+
+  build-docker:
+    name: Build Docker Container
+    runs-on: ubuntu-latest
+
+    needs: [build-binary]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: '1.x'  # Use the latest Go version
+
+      - name: Build Binary
+        run: go build
+
+      - name: Build Docker image
+        run: |
+          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.run_number }} .
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Docker image to GHCR
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.run_number }}
