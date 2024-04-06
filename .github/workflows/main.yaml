@@ -53,10 +53,8 @@ jobs:
         run: go build
 
       - name: Get latest release tag
-        id: get_latest_release
-        run: |
-          tag=$(git describe --tags $(git rev-list --tags --max-count=1))
-          echo "::set-output name=release_tag::${tag}"
+        id: get_latest_tag
+        run: echo "::set-output name=release_tag::$(git describe --tags --abbrev=0)"
 
       - name: Create Release
         id: create_release
@@ -64,8 +62,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_latest_release.outputs.release_tag || 'v1.00' }}
-          release_name: Release ${{ steps.get_latest_release.outputs.release_tag || 'v1.00' }}
+          tag_name: ${{ steps.get_latest_tag.outputs.release_tag }}
+          release_name: Release ${{ steps.get_latest_tag.outputs.release_tag }}
           body: |
             Automated release from CI/CD.
             
@@ -94,7 +92,8 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.create_release.outputs.tag_name }} .
+          docker build -t ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }} .
+          docker tag ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }} ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
@@ -105,4 +104,5 @@ jobs:
 
       - name: Push Docker image to GHCR
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.create_release.outputs.tag_name }}
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ steps.get_latest_tag.outputs.release_tag }}
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:latest
