@@ -45,8 +45,7 @@ jobs:
   test:
     name: Run Tests
     runs-on: ubuntu-latest
-    needs: [check-go-changes, check-existing-release]
-    if: ${{ needs.check-go-changes.outputs.go_changed == 'true' }}
+    needs: [check-go-changes]
 
     steps:
       - name: Checkout code
@@ -64,7 +63,6 @@ jobs:
     name: Build Binary and Release
     runs-on: ubuntu-latest
     needs: [test, check-existing-release]
-    if: ${{ needs.check-existing-release.outputs.existing_release == 'true' }}
 
     steps:
       - name: Checkout code
@@ -77,6 +75,18 @@ jobs:
 
       - name: Build Binary
         run: go build
+
+      - name: Get latest release tag
+        id: get_latest_tag
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null) || true
+          if [ -z "$latest_tag" ]; then
+            echo "No existing tags found."
+            echo "::set-output name=existing_release::false"
+          else
+            echo "Existing release found: $latest_tag"
+            echo "::set-output name=existing_release::true"
+          fi
 
       - name: Create Release
         id: create_release
@@ -93,8 +103,7 @@ jobs:
   build-docker:
     name: Build Docker Container
     runs-on: ubuntu-latest
-    needs: [build-binary, check-existing-release]
-    if: ${{ needs.check-existing-release.outputs.existing_release == 'true' }}
+    needs: [build-binary]
 
     steps:
       - name: Checkout code
