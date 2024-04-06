@@ -56,12 +56,13 @@ jobs:
         id: get_latest_tag
         run: |
           latest_tag=$(git describe --tags --abbrev=0 2>/dev/null)
-          if [ -z "$latest_tag" ]; then
+          if [ $? -eq 0 ]; then
+            echo "::set-output name=release_tag::$latest_tag"
+          else
             echo "No existing tags, setting initial version"
             echo "::set-output name=release_tag::1.0.0"
-          else
-            echo "::set-output name=release_tag::$latest_tag"
           fi
+      
       
 
       - name: Create Release
