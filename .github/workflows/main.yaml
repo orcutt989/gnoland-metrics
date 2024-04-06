@@ -88,7 +88,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ github.event.repository.releases_url }}
-          asset_path: ./gnoland-metrics
+          asset_path: /home/runner/work/gnoland-metrics/gnoland-metrics/gnoland-metrics
           asset_name: gnoland-metrics
           asset_content_type: application/octet-stream
 
