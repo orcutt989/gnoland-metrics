@@ -83,9 +83,11 @@ jobs:
           if [ -z "$latest_tag" ]; then
             echo "No existing tags found."
             echo "::set-output name=existing_release::false"
+            echo "::set-output name=release_tag::1.0.0"
           else
             echo "Existing release found: $latest_tag"
             echo "::set-output name=existing_release::true"
+            echo "::set-output name=release_tag::$latest_tag"
           fi
 
       - name: Create Release
